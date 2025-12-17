@@ -1,0 +1,11 @@
+pandas
+numpy
+matplotlib
+scipy
+seaborn
+pythermalcomfort>=2.8
+numba
+llvmlite
+jupyter
+ipykernel
+fastparquet

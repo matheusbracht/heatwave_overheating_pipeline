@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from typing import Literal, Optional
 import pandas as pd
 
-Method = Literal["INMET", "Ouzeau"]
+Method = Literal["INMET", "Ouzeau", "TW_P90"]
 
 @dataclass
 class Thresholds:
@@ -17,6 +17,7 @@ class Thresholds:
     normals_m: Optional[pd.DataFrame] = None  # INMET: ['month','tmax_norm']
     delta_c: float = 5.0                      # INMET: offset de 5°C
     sdeb_c: Optional[float] = None            # Ouzeau: Sdeb (P97.5) em °C
+    tw_p90_c: Optional[float] = None          # TW_P90: P90 de TW em °C
 
 # ------------------------- helpers internos -------------------------
 
@@ -60,6 +61,21 @@ def _daily_excess_ouzeau(daily_tmean: pd.DataFrame,
     dm["excess_c"] = (dm["tmean_c"] - dm["threshold"]).clip(lower=0)
     return dm[["timeset", "excess_c", "threshold", "tmean_c"]]
 
+def _daily_excess_tw_p90(daily_twmean: pd.DataFrame,
+                         tw_p90_c: float) -> pd.DataFrame:
+    """
+    Excedente diário para TW_P90:
+      threshold = tw_p90_c
+      excess    = max(Tw_mean - tw_p90_c, 0)
+    Espera: daily_twmean['timeset','twmean_c']
+    Retorna: ['timeset','excess_c','threshold','twmean_c']
+    """
+    dm = daily_twmean[["timeset", "twmean_c"]].dropna().copy()
+    dm["threshold"] = float(tw_p90_c)
+    dm["excess_c"]  = (dm["twmean_c"] - dm["threshold"]).clip(lower=0)
+    return dm[["timeset", "excess_c", "threshold", "twmean_c"]]
+
+
 # ------------------------- API pública -------------------------
 
 def compute_event_metrics(
@@ -67,6 +83,8 @@ def compute_event_metrics(
     daily_tmean: pd.DataFrame,
     daily_tmax: pd.DataFrame,
     thr: Thresholds,
+    daily_twmean: Optional[pd.DataFrame] = None,  
+    
 ) -> pd.DataFrame:
     """
     Adiciona métricas padronizadas aos eventos:
@@ -111,12 +129,22 @@ def compute_event_metrics(
         if thr.normals_m is None:
             raise ValueError("Para INMET, forneça normals_m (cols: ['month','tmax_norm']).")
         dex = _daily_excess_inmet(daily_tmax, thr.normals_m, thr.delta_c).set_index("timeset")
+
     elif thr.method == "Ouzeau":
         if thr.sdeb_c is None:
             raise ValueError("Para Ouzeau, forneça sdeb_c (Sdeb = P97.5).")
         dex = _daily_excess_ouzeau(daily_tmean, thr.sdeb_c).set_index("timeset")
+
+    elif thr.method == "TW_P90":
+        if thr.tw_p90_c is None:
+            raise ValueError("Para TW_P90, forneça tw_p90_c (P90 global da Tw diária).")
+        if daily_twmean is None:
+            raise ValueError("Para TW_P90, forneça daily_twmean com colunas ['timeset','twmean_c'].")
+        dex = _daily_excess_tw_p90(daily_twmean, thr.tw_p90_c).set_index("timeset")
+
     else:
         raise ValueError(f"Método desconhecido: {thr.method}")
+
 
     ev["severity_cday"] = 0.0
     for i, r in ev.iterrows():
